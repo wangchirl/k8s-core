@@ -47,10 +47,10 @@ hostnamectl set-hostname <hostname>
 
 # 在master添加hosts
 cat >> /etc/hosts << EOF
-192.168.44.158    master.k8s.io   k8s-vip
-192.168.44.155    master01.k8s.io master1
-192.168.44.156    master02.k8s.io master2
-192.168.44.157    node01.k8s.io   node1
+10.0.0.228    master.k8s.io   k8s-vip
+10.0.0.225    master01.k8s.io k8s-master1
+10.0.0.226    master02.k8s.io k8s-master2
+10.0.0.227    node01.k8s.io   k8s-node1
 EOF
 
 # 将桥接的IPv4流量传递到iptables的链
@@ -108,7 +108,7 @@ vrrp_instance VI_1 {
         auth_pass ceb1b3ec013d66163d6ab
     }
     virtual_ipaddress {
-        192.168.44.158
+        10.0.0.228
     }
     track_script {
         check_haproxy
@@ -147,7 +147,7 @@ vrrp_instance VI_1 {
         auth_pass ceb1b3ec013d66163d6ab
     }
     virtual_ipaddress {
-        192.168.44.158
+        10.0.0.228
     }
     track_script {
         check_haproxy
@@ -253,8 +253,8 @@ frontend kubernetes-apiserver
 backend kubernetes-apiserver
     mode        tcp
     balance     roundrobin
-    server      master01.k8s.io   192.168.44.155:6443 check
-    server      master02.k8s.io   192.168.44.156:6443 check
+    server      master01.k8s.io   10.0.0.225:6443 check
+    server      master02.k8s.io   10.0.0.226:6443 check
 #---------------------------------------------------------------------
 # collection haproxy statistics message
 #---------------------------------------------------------------------
@@ -328,8 +328,9 @@ EOF
 
 由于版本更新频繁，这里指定版本号部署：
 
-```
-$ yum install -y kubelet-1.16.3 kubeadm-1.16.3 kubectl-1.16.3
+```sh
+$ yum install -y kubelet-1.21.1 kubeadm-1.21.1 kubectl-1.21.1
+# yum install -y kubelet-1.16.3 kubeadm-1.16.3 kubectl-1.16.3
 $ systemctl enable kubelet
 ```
 
@@ -339,7 +340,7 @@ $ systemctl enable kubelet
 
 ### 6.1 创建kubeadm配置文件
 
-在具有vip的master上操作，这里为master1
+**在具有vip的master上操作**，CPU核心2及以上，这里为master1
 
 ```
 $ mkdir /usr/local/kubernetes/manifests -p
@@ -350,12 +351,12 @@ $ vi kubeadm-config.yaml
 
 apiServer:
   certSANs:
-    - master1
-    - master2
+    - k8s-master1
+    - k8s-master2
     - master.k8s.io
-    - 192.168.44.158
-    - 192.168.44.155
-    - 192.168.44.156
+    - 10.0.0.228
+    - 10.0.0.225
+    - 10.0.0.226
     - 127.0.0.1
   extraArgs:
     authorization-mode: Node,RBAC
@@ -408,6 +409,11 @@ $ kubectl get pods -n kube-system
 kubeadm join master.k8s.io:16443 --token jv5z7n.3y1zi95p952y9p65 \
     --discovery-token-ca-cert-hash sha256:403bca185c2f3a4791685013499e7ce58f9848e2213e27194b75a2e3293d8812 \
     --control-plane 
+    
+    
+kubeadm join master.k8s.io:16443 --token zmk3wa.uq1si7n3dkkw9dne \
+    --discovery-token-ca-cert-hash sha256:99f4cdd77ef76229cf157c7244fa25789be2d621b09c2be3b072ffe940a9ba22 \
+    --control-plane
 ```
 
 查看集群状态
@@ -453,11 +459,11 @@ kubectl get pods -n kube-system
 从master1复制密钥及相关文件到master2
 
 ```bash
-# ssh root@192.168.44.156 mkdir -p /etc/kubernetes/pki/etcd
+# ssh root@10.0.0.226 mkdir -p /etc/kubernetes/pki/etcd
 
-# scp /etc/kubernetes/admin.conf root@192.168.44.156:/etc/kubernetes
+# scp /etc/kubernetes/admin.conf root@10.0.0.226:/etc/kubernetes
    
-# scp /etc/kubernetes/pki/{ca.*,sa.*,front-proxy-ca.*} root@192.168.44.156:/etc/kubernetes/pki
+# scp /etc/kubernetes/pki/{ca.*,sa.*,front-proxy-ca.*} root@10.0.0.226:/etc/kubernetes/pki
    
 # scp /etc/kubernetes/pki/etcd/ca.* root@192.168.44.156:/etc/kubernetes/pki/etcd
 ```
