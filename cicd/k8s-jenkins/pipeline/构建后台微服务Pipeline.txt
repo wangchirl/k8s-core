@@ -1,0 +1,94 @@
+
+def git_address = "http://192.168.66.100:82/itheima_group/tensquare_back_cluster.git"
+def git_auth = "9d9a2707-eab7-4dc9-b106-e52f329cbc95"
+//构建版本的名称
+def tag = "latest"
+//Harbor私服地址
+def harbor_url = "192.168.66.102:85"
+//Harbor的项目名称
+def harbor_project_name = "tensquare"
+//Harbor的凭证
+def harbor_auth = "71eff071-ec17-4219-bae1-5d0093e3d060"
+def secret_name = "registry-auth-secret"
+//k8s凭证
+def k8s_auth = "c5fe8670-f5a7-4b1a-811c-48ab5de2aed9";
+
+
+podTemplate(label: 'jenkins-slave', cloud: 'kubernetes', containers: [
+    containerTemplate(
+        name: 'jnlp', 
+        image: "192.168.66.102:85/library/jenkins-slave-maven:latest"
+    ),
+    containerTemplate(
+        name: 'docker', 
+        image: "docker:stable",
+        ttyEnabled: true,
+        command: 'cat'
+    ),
+  ],
+  volumes: [
+    hostPathVolume(mountPath: '/var/run/docker.sock', hostPath: '/var/run/docker.sock'),
+    nfsVolume(mountPath: '/usr/local/apache-maven/repo', serverAddress: '192.168.66.101' , serverPath: '/opt/nfs/maven'),
+  ],
+) 
+{
+  node("jenkins-slave"){
+      // 第一步
+      stage('拉取代码'){
+         checkout([$class: 'GitSCM', branches: [[name: '${branch}']], userRemoteConfigs: [[credentialsId: "${git_auth}", url: "${git_address}"]]])
+      }
+      // 第二步
+      stage('代码编译'){
+           //编译并安装公共工程
+         sh "mvn -f tensquare_common clean install" 
+      }
+      // 第三步
+      stage('构建镜像，部署项目'){
+	//把选择的项目信息转为数组
+	def selectedProjects = "${project_name}".split(',')		
+            for(int i=0;i<selectedProjects.size();i++){
+                //取出每个项目的名称和端口
+                def currentProject = selectedProjects[i];
+                //项目名称
+                def currentProjectName = currentProject.split('@')[0]
+                //项目启动端口
+                def currentProjectPort = currentProject.split('@')[1]
+
+                 //定义镜像名称
+                 def imageName = "${currentProjectName}:${tag}"
+				 
+				 //编译，构建本地镜像
+				 sh "mvn -f ${currentProjectName} clean package dockerfile:build"
+				 container('docker') {
+
+					 //给镜像打标签
+					 sh "docker tag ${imageName} ${harbor_url}/${harbor_project_name}/${imageName}"
+
+					 //登录Harbor，并上传镜像
+					 withCredentials([usernamePassword(credentialsId: "${harbor_auth}", passwordVariable: 'password', usernameVariable: 'username')]) {
+						  //登录
+						  sh "docker login -u ${username} -p ${password} ${harbor_url}"
+						  //上传镜像
+						  sh "docker push ${harbor_url}/${harbor_project_name}/${imageName}"
+					 }
+
+					 //删除本地镜像
+					 sh "docker rmi -f ${imageName}"
+					 sh "docker rmi -f ${harbor_url}/${harbor_project_name}/${imageName}"
+				 }
+				 
+				 def deploy_image_name = "${harbor_url}/${harbor_project_name}/${imageName}"
+				 
+				 //部署到K8S
+			     sh """
+                        sed -i 's#\$IMAGE_NAME#${deploy_image_name}#' ${currentProjectName}/deploy.yml
+						sed -i 's#\$SECRET_NAME#${secret_name}#' ${currentProjectName}/deploy.yml
+                 """
+                      
+                 kubernetesDeploy configs: "${currentProjectName}/deploy.yml", kubeconfigId: "${k8s_auth}"
+         } 
+      }
+  }
+}
+
+

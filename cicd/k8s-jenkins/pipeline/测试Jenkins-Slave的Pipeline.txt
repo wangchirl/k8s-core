@@ -1,0 +1,23 @@
+
+def git_address = "http://192.168.66.100:82/itheima_group/tensquare_back_cluster.git"
+def git_auth = "9d9a2707-eab7-4dc9-b106-e52f329cbc95"
+
+//创建一个Pod的模板，label为jenkins-slave
+podTemplate(label: 'jenkins-slave', cloud: 'kubernetes', containers: [
+    containerTemplate(
+        name: 'jnlp', 
+        image: "192.168.66.102:85/library/jenkins-slave-maven:latest"
+    )
+  ]
+) 
+{
+  //引用jenkins-slave的pod模块来构建Jenkins-Slave的pod
+  node("jenkins-slave"){
+      // 第一步
+      stage('拉取代码'){
+         checkout([$class: 'GitSCM', branches: [[name: 'master']], userRemoteConfigs: [[credentialsId: "${git_auth}", url: "${git_address}"]]])
+      }
+  }
+}
+
+
